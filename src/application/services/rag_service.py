@@ -3,7 +3,6 @@ RAG Service - Retrieval Augmented Generation
 """
 from typing import List, Dict, Any, Optional
 import chromadb
-from chromadb.config import Settings
 from src.config.settings import get_settings
 from sentence_transformers import SentenceTransformer
 import asyncio
@@ -23,10 +22,10 @@ class RAGService:
     """Service for RAG operations with ChromaDB"""
     
     def __init__(self):
-        self.client = chromadb.Client(Settings(
-            chroma_db_impl="duckdb+parquet",
-            persist_directory=settings.chroma_persist_directory
-        ))
+        # Modern ChromaDB client initialization
+        self.client = chromadb.PersistentClient(
+            path=settings.chroma_persist_directory
+        )
         
         # Initialize collections
         self.macro_collection = self.client.get_or_create_collection(
@@ -134,7 +133,7 @@ class RAGService:
             embeddings = await asyncio.to_thread(
                 self.embedding_model.encode, texts, show_progress_bar=False
             )
-            return embeddings
+            return embeddings.tolist()
         except Exception as e:
             logger.error(f"Error generating embeddings: {str(e)}")
             raise

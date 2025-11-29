@@ -4,6 +4,10 @@ Sentiment Analyst Agent - Analyzes market sentiment and news
 import json
 from typing import Dict, Any, Optional
 from src.application.agents.base_agent import BaseAgent
+from src.application.services.rag_service import RAGService
+from src.application.services.tts_service import TTSService
+from src.application.services.speech_service import SpeechService
+from src.application.services.translation_service import TranslationService
 from src.adapters.external.newsapi_client import NewsAPIClient
 from src.utilities.logger import get_logger
 
@@ -18,6 +22,10 @@ class SentimentAnalyst(BaseAgent):
             name="Sentiment Analyst",
             description="Analyzes market sentiment from news and social signals"
         )
+        self.rag_service = RAGService()
+        self.tts_service = TTSService()
+        self.speech_service = SpeechService()
+        self.translation_service = TranslationService()
     
     def get_system_prompt(self) -> str:
         """Get system prompt for sentiment analysis"""
@@ -60,17 +68,28 @@ Analyze sentiment from news and provide insights in JSON format:
             Sentiment analysis results
         """
         try:
+            # Translate query to English if needed
+            user_language = context.get("language", "en") if context else "en"
+            query_in_english = self.translation_service.translate_text(query, src=user_language, dest="en")
+            
             asset = context.get("asset_symbol", "market") if context else "market"
             logger.info(f"Sentiment Analyst analyzing: {asset}")
             
             # Collect news data
             news_data = await self._collect_news_sentiment(asset)
             
+            # Retrieve context using RAGService
+            documents = await self.rag_service.query_collection(query_in_english, "news")
+            logger.info(f"Retrieved {len(documents)} documents for query: {query_in_english}")
+            
             # Format prompt
-            user_prompt = f"""Analyze market sentiment for {asset}: {query}
+            user_prompt = f"""Analyze market sentiment for {asset}: {query_in_english}
 
 Recent News and Headlines:
 {news_data}
+
+Retrieved Context:
+{json.dumps(documents, indent=2)}
 
 Provide comprehensive sentiment analysis with specific narratives and signals."""
             
@@ -90,6 +109,17 @@ Provide comprehensive sentiment analysis with specific narratives and signals.""
                     "confidence": 0.6,
                     "key_factors": []
                 }
+            
+            # Translate response back to user's language
+            translated_summary = self.translation_service.translate_text(
+                analysis.get("summary", ""), src="en", dest=user_language
+            )
+            analysis["summary"] = translated_summary
+            
+            # Convert response to speech if requested
+            if context.get("audio_output", False):
+                audio_path = self.tts_service.text_to_speech(translated_summary, language=user_language)
+                analysis["audio_path"] = audio_path
             
             return self.format_output(
                 analysis=analysis,

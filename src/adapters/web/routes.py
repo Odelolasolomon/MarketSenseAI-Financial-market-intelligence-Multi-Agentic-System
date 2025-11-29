@@ -1,17 +1,27 @@
 """
 API Routes
 """
-from typing import Optional
+from typing import Optional, Dict, Any
 from fastapi import APIRouter, HTTPException, BackgroundTasks
 from pydantic import BaseModel, Field
-from datetime import datetime
+from datetime import datetime 
 from src.application.services.analysis_service import AnalysisService
 from src.application.services.data_service import DataService
+from src.application.services.speech_service import SpeechService
+from src.application.services.tts_service import TTSService
+from src.application.services.rag_service import RAGService
+from src.application.services.translation_service import TranslationService
 from src.domain.value_objects.timeframe import TimeframeVO
 from src.utilities.logger import get_logger
 
+
 logger = get_logger(__name__)
 router = APIRouter()
+
+speech_service = SpeechService()
+tts_service = TTSService()
+translation_service = TranslationService()
+
 
 
 # Request/Response Models
@@ -236,3 +246,36 @@ async def get_agents_status():
         },
         "timestamp": datetime.now().isoformat()
     }
+
+@router.post("/api/v1/speech-to-text")
+async def speech_to_text(language: str = "en-US"):
+    try:
+        text = speech_service.speech_to_text(language=language)
+        return {"text": text}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.post("/api/v1/text-to-speech")
+async def text_to_speech(text: str, language: str = "en"):
+    try:
+        audio_path = tts_service.text_to_speech(text=text, language=language)
+        return {"audio_path": audio_path}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.post("/api/v1/translate")
+async def translate_text(text: str, src: str, dest: str):
+    try:
+        translated_text = translation_service.translate_text(text=text, src=src, dest=dest)
+        return {"translated_text": translated_text}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+    
+@router.post("/api/v1/update-crypto-knowledge")
+async def update_crypto_knowledge(crypto_data: Dict[str, Any]):
+    try:
+        rag_service = RAGService()
+        await rag_service.update_crypto_knowledge(crypto_data)
+        return {"message": "Crypto knowledge updated successfully"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))

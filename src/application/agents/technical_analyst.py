@@ -4,8 +4,11 @@ Technical Analyst Agent - Analyzes price action and technical indicators
 import json
 from typing import Dict, Any, Optional
 from src.application.agents.base_agent import BaseAgent
+from src.application.services.rag_service import RAGService
+from src.application.services.tts_service import TTSService
+from src.application.services.speech_service import SpeechService
+from src.application.services.translation_service import TranslationService
 from src.adapters.external.binance_client import BinanceClient
-from src.adapters.external.coingecko_client import CoinGeckoClient
 from src.utilities.logger import get_logger
 import pandas as pd
 from ta import momentum, trend, volatility
@@ -21,6 +24,10 @@ class TechnicalAnalyst(BaseAgent):
             name="Technical Analyst",
             description="Analyzes price action, technical indicators, and on-chain metrics"
         )
+        self.rag_service = RAGService()
+        self.tts_service = TTSService()
+        self.speech_service = SpeechService()
+        self.translation_service = TranslationService()
     
     def get_system_prompt(self) -> str:
         """Get system prompt for technical analysis"""
@@ -64,17 +71,28 @@ Provide analysis in JSON format with:
             Technical analysis results
         """
         try:
+            # Translate query to English if needed
+            user_language = context.get("language", "en") if context else "en"
+            query_in_english = self.translation_service.translate_text(query, src=user_language, dest="en")
+            
             asset_symbol = context.get("asset_symbol", "BTC") if context else "BTC"
             logger.info(f"Technical Analyst analyzing: {asset_symbol}")
+            
+            # Retrieve context using RAGService
+            documents = await self.rag_service.query_collection(query_in_english, "crypto")
+            logger.info(f"Retrieved {len(documents)} documents for query: {query_in_english}")
             
             # Collect price data and calculate indicators
             technical_data = await self._collect_technical_data(asset_symbol)
             
             # Format prompt
-            user_prompt = f"""Analyze technical indicators for {asset_symbol}: {query}
+            user_prompt = f"""Analyze technical indicators for {asset_symbol}: {query_in_english}
 
 Technical Data:
 {json.dumps(technical_data, indent=2)}
+
+Retrieved Context:
+{json.dumps(documents, indent=2)}
 
 Provide comprehensive technical analysis with specific price levels."""
             
@@ -93,6 +111,17 @@ Provide comprehensive technical analysis with specific price levels."""
                     "confidence": 0.6,
                     "key_factors": []
                 }
+            
+            # Translate response back to user's language
+            translated_response = self.translation_service.translate_text(
+                analysis.get("summary", ""), src="en", dest=user_language
+            )
+            analysis["summary"] = translated_response
+            
+            # Convert response to speech if requested
+            if context.get("audio_output", False):
+                audio_path = self.tts_service.text_to_speech(translated_response, language=user_language)
+                analysis["audio_path"] = audio_path
             
             return self.format_output(
                 analysis=analysis,

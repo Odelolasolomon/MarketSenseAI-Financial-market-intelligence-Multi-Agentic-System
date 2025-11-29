@@ -8,6 +8,10 @@ from src.application.agents.base_agent import BaseAgent
 from src.application.agents.macro_analyst import MacroAnalyst
 from src.application.agents.technical_analyst import TechnicalAnalyst
 from src.application.agents.sentiment_analyst import SentimentAnalyst
+from src.application.services.rag_service import RAGService
+from src.application.services.tts_service import TTSService
+from src.application.services.speech_service import SpeechService
+from src.application.services.translation_service import TranslationService
 from src.domain.entities.analysis import Analysis, AgentAnalysis
 from src.domain.value_objects.timeframe import TimeframeVO
 from src.config.constants import MarketOutlook, TradingAction, RiskLevel
@@ -27,6 +31,10 @@ class SynthesisAgent(BaseAgent):
         self.macro_analyst = MacroAnalyst()
         self.technical_analyst = TechnicalAnalyst()
         self.sentiment_analyst = SentimentAnalyst()
+        self.rag_service = RAGService()
+        self.tts_service = TTSService()
+        self.speech_service = SpeechService()
+        self.translation_service = TranslationService()
     
     def get_system_prompt(self) -> str:
         """Get system prompt for synthesis"""
@@ -75,12 +83,20 @@ Provide synthesis in JSON format:
         try:
             logger.info(f"Synthesis Agent coordinating analysis: {query}")
             
+            # Translate query to English if needed
+            user_language = context.get("language", "en") if context else "en"
+            query_in_english = self.translation_service.translate_text(query, src=user_language, dest="en")
+            
             asset_symbol = context.get("asset_symbol", "MARKET") if context else "MARKET"
             
+            # Retrieve context using RAGService
+            documents = await self.rag_service.query_collection(query_in_english, "macro")
+            logger.info(f"Retrieved {len(documents)} documents for query: {query_in_english}")
+            
             # Execute all specialist agents in parallel
-            macro_task = self.macro_analyst.analyze(query, context)
-            technical_task = self.technical_analyst.analyze(query, context)
-            sentiment_task = self.sentiment_analyst.analyze(query, context)
+            macro_task = self.macro_analyst.analyze(query_in_english, context)
+            technical_task = self.technical_analyst.analyze(query_in_english, context)
+            sentiment_task = self.sentiment_analyst.analyze(query_in_english, context)
             
             macro_result, technical_result, sentiment_result = await asyncio.gather(
                 macro_task, technical_task, sentiment_task,
@@ -94,75 +110,32 @@ Provide synthesis in JSON format:
             
             # Synthesize results
             synthesis = await self._synthesize_results(
-                query,
+                query_in_english,
                 asset_symbol,
                 macro_result,
                 technical_result,
                 sentiment_result
             )
             
-            # Create AgentAnalysis objects
-            macro_analysis = AgentAnalysis(
-                agent_name=macro_result.get("agent_name", "Macro Analyst"),
-                summary=macro_result.get("summary", ""),
-                confidence=macro_result.get("confidence", 0.5),
-                key_factors=macro_result.get("key_factors", []),
-                data_sources=macro_result.get("data_sources", []),
-                detailed_analysis=macro_result.get("detailed_analysis", {})
+            # Translate response back to user's language
+            translated_summary = self.translation_service.translate_text(
+                synthesis.get("executive_summary", ""), src="en", dest=user_language
             )
+            synthesis["executive_summary"] = translated_summary
             
-            technical_analysis = AgentAnalysis(
-                agent_name=technical_result.get("agent_name", "Technical Analyst"),
-                summary=technical_result.get("summary", ""),
-                confidence=technical_result.get("confidence", 0.5),
-                key_factors=technical_result.get("key_factors", []),
-                data_sources=technical_result.get("data_sources", []),
-                detailed_analysis=technical_result.get("detailed_analysis", {})
-            )
-            
-            sentiment_analysis = AgentAnalysis(
-                agent_name=sentiment_result.get("agent_name", "Sentiment Analyst"),
-                summary=sentiment_result.get("summary", ""),
-                confidence=sentiment_result.get("confidence", 0.5),
-                key_factors=sentiment_result.get("key_factors", []),
-                data_sources=sentiment_result.get("data_sources", []),
-                detailed_analysis=sentiment_result.get("detailed_analysis", {})
-            )
-            
-            # Calculate overall confidence
-            confidences = [
-                macro_result.get("confidence", 0.5),
-                technical_result.get("confidence", 0.5),
-                sentiment_result.get("confidence", 0.5)
-            ]
-            overall_confidence = sum(confidences) / len(confidences)
-            
-            # Calculate risk score (simplified)
-            risk_score = 1 - overall_confidence
+            # Convert response to speech if requested
+            if context.get("audio_output", False):
+                audio_path = self.tts_service.text_to_speech(translated_summary, language=user_language)
+                synthesis["audio_path"] = audio_path
             
             # Create Analysis entity
-            analysis = Analysis(
+            analysis = self._create_analysis_entity(
                 query=query,
                 asset_symbol=asset_symbol,
-                executive_summary=synthesis.get("executive_summary", ""),
-                investment_thesis=synthesis.get("investment_thesis", ""),
-                outlook=MarketOutlook(synthesis.get("outlook", "neutral")),
-                overall_confidence=overall_confidence,
-                risk_level=self._get_risk_level(risk_score),
-                risk_score=risk_score,
-                trading_action=TradingAction(synthesis.get("trading_action", "hold")),
-                position_sizing=synthesis.get("position_sizing", "small"),
-                entry_points=synthesis.get("entry_points", []),
-                stop_loss=synthesis.get("stop_loss"),
-                time_horizon=synthesis.get("time_horizon", "medium"),
-                bullish_factors=synthesis.get("bullish_factors", []),
-                bearish_factors=synthesis.get("bearish_factors", []),
-                critical_factors=synthesis.get("critical_factors", []),
-                key_risks=synthesis.get("key_risks", []),
-                risk_mitigations=synthesis.get("risk_mitigations", []),
-                macro_analysis=macro_analysis,
-                technical_analysis=technical_analysis,
-                sentiment_analysis=sentiment_analysis
+                synthesis=synthesis,
+                macro_result=macro_result,
+                technical_result=technical_result,
+                sentiment_result=sentiment_result
             )
             
             return analysis
@@ -213,6 +186,79 @@ Provide comprehensive synthesis with specific recommendations."""
             }
         
         return synthesis
+    
+    def _create_analysis_entity(
+        self,
+        query: str,
+        asset_symbol: str,
+        synthesis: Dict[str, Any],
+        macro_result: Dict[str, Any],
+        technical_result: Dict[str, Any],
+        sentiment_result: Dict[str, Any]
+    ) -> Analysis:
+        """Create Analysis entity from results"""
+        # Create AgentAnalysis objects
+        macro_analysis = AgentAnalysis(
+            agent_name=macro_result.get("agent_name", "Macro Analyst"),
+            summary=macro_result.get("summary", ""),
+            confidence=macro_result.get("confidence", 0.5),
+            key_factors=macro_result.get("key_factors", []),
+            data_sources=macro_result.get("data_sources", []),
+            detailed_analysis=macro_result.get("detailed_analysis", {})
+        )
+        
+        technical_analysis = AgentAnalysis(
+            agent_name=technical_result.get("agent_name", "Technical Analyst"),
+            summary=technical_result.get("summary", ""),
+            confidence=technical_result.get("confidence", 0.5),
+            key_factors=technical_result.get("key_factors", []),
+            data_sources=technical_result.get("data_sources", []),
+            detailed_analysis=technical_result.get("detailed_analysis", {})
+        )
+        
+        sentiment_analysis = AgentAnalysis(
+            agent_name=sentiment_result.get("agent_name", "Sentiment Analyst"),
+            summary=sentiment_result.get("summary", ""),
+            confidence=sentiment_result.get("confidence", 0.5),
+            key_factors=sentiment_result.get("key_factors", []),
+            data_sources=sentiment_result.get("data_sources", []),
+            detailed_analysis=sentiment_result.get("detailed_analysis", {})
+        )
+        
+        # Calculate overall confidence
+        confidences = [
+            macro_result.get("confidence", 0.5),
+            technical_result.get("confidence", 0.5),
+            sentiment_result.get("confidence", 0.5)
+        ]
+        overall_confidence = sum(confidences) / len(confidences)
+        
+        # Calculate risk score (simplified)
+        risk_score = 1 - overall_confidence
+        
+        return Analysis(
+            query=query,
+            asset_symbol=asset_symbol,
+            executive_summary=synthesis.get("executive_summary", ""),
+            investment_thesis=synthesis.get("investment_thesis", ""),
+            outlook=MarketOutlook(synthesis.get("outlook", "neutral")),
+            overall_confidence=overall_confidence,
+            risk_level=self._get_risk_level(risk_score),
+            risk_score=risk_score,
+            trading_action=TradingAction(synthesis.get("trading_action", "hold")),
+            position_sizing=synthesis.get("position_sizing", "small"),
+            entry_points=synthesis.get("entry_points", []),
+            stop_loss=synthesis.get("stop_loss"),
+            time_horizon=synthesis.get("time_horizon", "medium"),
+            bullish_factors=synthesis.get("bullish_factors", []),
+            bearish_factors=synthesis.get("bearish_factors", []),
+            critical_factors=synthesis.get("critical_factors", []),
+            key_risks=synthesis.get("key_risks", []),
+            risk_mitigations=synthesis.get("risk_mitigations", []),
+            macro_analysis=macro_analysis,
+            technical_analysis=technical_analysis,
+            sentiment_analysis=sentiment_analysis
+        )
     
     def _get_risk_level(self, risk_score: float) -> RiskLevel:
         """Convert risk score to risk level"""

@@ -4,6 +4,10 @@ Macro Analyst Agent - Analyzes macroeconomic conditions
 import json
 from typing import Dict, Any, Optional
 from src.application.agents.base_agent import BaseAgent
+from src.application.services.rag_service import RAGService
+from src.application.services.tts_service import TTSService
+from src.application.services.speech_service import SpeechService
+from src.application.services.translation_service import TranslationService
 from src.adapters.external.fred_client import FREDClient
 from src.adapters.external.newsapi_client import NewsAPIClient
 from src.utilities.logger import get_logger
@@ -19,6 +23,10 @@ class MacroAnalyst(BaseAgent):
             name="Macro Analyst",
             description="Analyzes macroeconomic conditions, monetary policy, and their impact on markets"
         )
+        self.rag_service = RAGService()
+        self.tts_service = TTSService()
+        self.speech_service = SpeechService()
+        self.translation_service = TranslationService()
     
     def get_system_prompt(self) -> str:
         """Get system prompt for macro analysis"""
@@ -62,20 +70,31 @@ Provide analysis in JSON format with:
         try:
             logger.info(f"Macro Analyst analyzing: {query}")
             
+            # Translate query to English if needed
+            user_language = context.get("language", "en") if context else "en"
+            query_in_english = self.translation_service.translate_text(query, src=user_language, dest="en")
+            
             # Collect economic data
             economic_data = await self._collect_economic_data()
             
             # Get relevant news
-            news_data = await self._collect_news_data(query)
+            news_data = await self._collect_news_data(query_in_english)
+            
+            # Retrieve context using RAGService
+            documents = await self.rag_service.query_collection(query_in_english, "macro")
+            logger.info(f"Retrieved {len(documents)} documents for query: {query_in_english}")
             
             # Format prompt
-            user_prompt = f"""Analyze the following for: {query}
+            user_prompt = f"""Analyze the following for: {query_in_english}
 
 Economic Data:
 {json.dumps(economic_data, indent=2)}
 
 Recent Economic News:
 {news_data}
+
+Retrieved Context:
+{json.dumps(documents, indent=2)}
 
 Provide comprehensive macroeconomic analysis."""
             
@@ -94,6 +113,17 @@ Provide comprehensive macroeconomic analysis."""
                     "confidence": 0.6,
                     "key_factors": []
                 }
+            
+            # Translate response back to user's language
+            translated_summary = self.translation_service.translate_text(
+                analysis.get("summary", ""), src="en", dest=user_language
+            )
+            analysis["summary"] = translated_summary
+            
+            # Convert response to speech if requested
+            if context.get("audio_output", False):
+                audio_path = self.tts_service.text_to_speech(translated_summary, language=user_language)
+                analysis["audio_path"] = audio_path
             
             return self.format_output(
                 analysis=analysis,
