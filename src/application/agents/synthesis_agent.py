@@ -3,7 +3,7 @@ Synthesis Agent - Coordinates all agents and synthesizes analysis
 """
 import json
 import asyncio
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, List
 from src.application.agents.base_agent import BaseAgent
 from src.application.agents.macro_analyst import MacroAnalyst
 from src.application.agents.technical_analyst import TechnicalAnalyst
@@ -12,7 +12,9 @@ from src.application.services.rag_service import RAGService
 from src.application.services.tts_service import TTSService
 from src.application.services.speech_service import SpeechService
 from src.application.services.translation_service import TranslationService
+from src.application.services.conversation_manager import ConversationManager
 from src.domain.entities.analysis import Analysis, AgentAnalysis
+from src.domain.entities.conversation import MessageRole
 from src.domain.value_objects.timeframe import TimeframeVO
 from src.config.constants import MarketOutlook, TradingAction, RiskLevel
 from src.utilities.logger import get_logger
@@ -89,14 +91,28 @@ Provide synthesis in JSON format:
             
             asset_symbol = context.get("asset_symbol", "MARKET") if context else "MARKET"
             
+            # Handle conversation memory
+            session_id = context.get("session_id") if context else None
+            conversation_id = context.get("conversation_id") if context else None
+            
+            # Inject conversation context if available
+            conversation_context = ""
+            if session_id and conversation_id:
+                conversation_context = ConversationManager.get_context_injection(session_id, conversation_id)
+                if conversation_context:
+                    logger.info(f"Injecting conversation context for {conversation_id}")
+            
+            # Append conversation context to query if available
+            enriched_query = f"{query_in_english}\n\n[Previous context:\n{conversation_context}]" if conversation_context else query_in_english
+            
             # Retrieve context using RAGService
             documents = await self.rag_service.query_collection(query_in_english, "macro")
             logger.info(f"Retrieved {len(documents)} documents for query: {query_in_english}")
             
             # Execute all specialist agents in parallel
-            macro_task = self.macro_analyst.analyze(query_in_english, context)
-            technical_task = self.technical_analyst.analyze(query_in_english, context)
-            sentiment_task = self.sentiment_analyst.analyze(query_in_english, context)
+            macro_task = self.macro_analyst.analyze(enriched_query, context)
+            technical_task = self.technical_analyst.analyze(enriched_query, context)
+            sentiment_task = self.sentiment_analyst.analyze(enriched_query, context)
             
             macro_result, technical_result, sentiment_result = await asyncio.gather(
                 macro_task, technical_task, sentiment_task,
@@ -138,6 +154,45 @@ Provide synthesis in JSON format:
                 sentiment_result=sentiment_result
             )
             
+            # Store in conversation memory if available
+            if session_id and conversation_id:
+                try:
+                    # Add user query to conversation
+                    ConversationManager.add_message(
+                        session_id,
+                        conversation_id,
+                        MessageRole.USER,
+                        query,
+                        metadata={"asset_symbol": asset_symbol}
+                    )
+                    
+                    # Add assistant response to conversation
+                    assistant_response = synthesis.get("final_response", synthesis.get("executive_summary", ""))
+                    ConversationManager.add_message(
+                        session_id,
+                        conversation_id,
+                        MessageRole.ASSISTANT,
+                        assistant_response,
+                        metadata={
+                            "outlook": synthesis.get("outlook"),
+                            "confidence": synthesis.get("confidence"),
+                            "action": synthesis.get("trading_action")
+                        }
+                    )
+                    
+                    # Update conversation context with latest analysis
+                    ConversationManager.update_conversation_context(
+                        session_id,
+                        conversation_id,
+                        outlook=synthesis.get("outlook", "neutral"),
+                        confidence=float(synthesis.get("confidence", 0.5)),
+                        action=synthesis.get("trading_action", "hold")
+                    )
+                    
+                    logger.info(f"Stored analysis in conversation memory for {conversation_id}")
+                except Exception as e:
+                    logger.warning(f"Failed to store in conversation memory: {e}")
+            
             return analysis
             
         except Exception as e:
@@ -152,39 +207,141 @@ Provide synthesis in JSON format:
         technical: Dict,
         sentiment: Dict
     ) -> Dict[str, Any]:
-        """Synthesize specialist results"""
-        
-        # Format analyses for prompt
-        user_prompt = f"""Synthesize comprehensive investment analysis for: {query}
-Asset: {asset_symbol}
+        """Create a deterministic, section-by-section synthesis and
+        a final combined result from the specialist agents.
 
-MACRO ANALYSIS:
-{json.dumps(macro, indent=2)}
+        This avoids calling an LLM and instead returns structured
+        sections for Macro, Technical and Sentiment analyses plus a
+        simple aggregated recommendation computed from the agents.
+        """
 
-TECHNICAL ANALYSIS:
-{json.dumps(technical, indent=2)}
+        def _classify_text_to_direction(text: str) -> str:
+            if not text:
+                return "neutral"
+            t = text.lower()
+            if any(k in t for k in ["bull", "positive", "up", "higher", "rally"]):
+                return "bullish"
+            if any(k in t for k in ["bear", "negative", "down", "lower", "sell"]):
+                return "bearish"
+            return "neutral"
 
-SENTIMENT ANALYSIS:
-{json.dumps(sentiment, indent=2)}
+        # Extract brief summaries and confidences
+        macro_summary = macro.get("summary", "")
+        technical_summary = technical.get("summary", "")
+        sentiment_summary = sentiment.get("summary", "")
 
-Provide comprehensive synthesis with specific recommendations."""
-        
-        # Execute synthesis
-        response = await self.execute_llm_call(
-            system_prompt=self.get_system_prompt(),
-            user_prompt=user_prompt
+        macro_conf = float(macro.get("confidence", 0.5) or 0.5)
+        technical_conf = float(technical.get("confidence", 0.5) or 0.5)
+        sentiment_conf = float(sentiment.get("confidence", 0.5) or 0.5)
+
+        # Classify outlooks/trends from agent outputs
+        macro_dir = _classify_text_to_direction(macro.get("outlook", macro_summary))
+        technical_dir = _classify_text_to_direction(technical.get("trend", technical_summary))
+        sentiment_dir = _classify_text_to_direction(sentiment.get("sentiment", sentiment_summary))
+
+        directions = [macro_dir, technical_dir, sentiment_dir]
+        # Majority vote for final outlook
+        bullish_count = sum(1 for d in directions if d == "bullish")
+        bearish_count = sum(1 for d in directions if d == "bearish")
+        if bullish_count > bearish_count:
+            final_outlook = "bullish"
+        elif bearish_count > bullish_count:
+            final_outlook = "bearish"
+        else:
+            final_outlook = "neutral"
+
+        # Determine trading action from outlook
+        if final_outlook == "bullish":
+            trading_action = "buy"
+        elif final_outlook == "bearish":
+            trading_action = "sell"
+        else:
+            trading_action = "hold"
+
+        # Position sizing heuristics based on average confidence
+        avg_conf = (macro_conf + technical_conf + sentiment_conf) / 3.0
+        if avg_conf >= 0.75:
+            position_sizing = "large"
+        elif avg_conf >= 0.6:
+            position_sizing = "medium"
+        else:
+            position_sizing = "small"
+
+        # Combine key factors and risks
+        def _collect_list(field: str, *sources: Dict) -> List[str]:
+            items = []
+            for s in sources:
+                for it in s.get(field, []) or []:
+                    if isinstance(it, str) and it.strip() and it not in items:
+                        items.append(it)
+            return items
+
+        bullish_factors = _collect_list("bullish_factors", macro, technical, sentiment)
+        bearish_factors = _collect_list("bearish_factors", macro, technical, sentiment)
+        critical_factors = _collect_list("critical_factors", macro, technical, sentiment)
+        key_risks = _collect_list("key_risks", macro, technical, sentiment)
+        risk_mitigations = _collect_list("risk_mitigations", macro, technical, sentiment)
+
+        # Build a concise investment thesis by concatenating agent theses if present
+        thesis_parts = []
+        for src in (macro, technical, sentiment):
+            t = src.get("investment_thesis") or src.get("detailed_analysis") or None
+            if isinstance(t, str) and t.strip():
+                thesis_parts.append(t.strip())
+        investment_thesis = " \n\n ".join(thesis_parts) if thesis_parts else "Combined analysis from specialists."
+
+        def _short(text: str, max_words: int = 40) -> str:
+            if not text:
+                return ""
+            # prefer first sentence
+            parts = text.split(".")
+            first = parts[0].strip()
+            words = first.split()
+            if len(words) <= max_words:
+                return first if first.endswith('.') else first + '.'
+            return ' '.join(words[:max_words]) + '...'
+
+        mac_short = _short(macro_summary, 40)
+        tech_short = _short(technical_summary, 40)
+        sent_short = _short(sentiment_summary, 40)
+
+        executive_summary = (
+            f"Technical analysis summary: {tech_short}\n"
+            f"Macro analyst summary: {mac_short}\n"
+            f"Sentiment analyst summary: {sent_short}\n"
+            f"Final: Outlook={final_outlook}. Recommendation={trading_action} (position={position_sizing}; confidence={round(avg_conf,2)})."
         )
-        
-        # Parse response
-        try:
-            synthesis = json.loads(response)
-        except json.JSONDecodeError:
-            synthesis = {
-                "executive_summary": response,
-                "outlook": "neutral",
-                "confidence": 0.6
-            }
-        
+
+        synthesis = {
+            # Section-by-section analysis
+            "sections": {
+                "macro": macro,
+                "technical": technical,
+                "sentiment": sentiment
+            },
+
+            # Aggregated final result
+            "executive_summary": executive_summary,
+            "investment_thesis": investment_thesis,
+            "outlook": final_outlook,
+            "trading_action": trading_action,
+            "position_sizing": position_sizing,
+            "entry_points": [],
+            "stop_loss": None,
+            "time_horizon": "medium",
+            "bullish_factors": bullish_factors,
+            "bearish_factors": bearish_factors,
+            "critical_factors": critical_factors,
+            "key_risks": key_risks,
+            "risk_mitigations": risk_mitigations,
+            "confidence": round(avg_conf, 4),
+            # Concise, user-facing fields requested
+            "technical_analysis_summary": tech_short,
+            "macro_analysis_summary": mac_short,
+            "sentiment_analysis_summary": sent_short,
+            "final_response": f"Outlook: {final_outlook}. Action: {trading_action}. Position: {position_sizing}. Confidence: {round(avg_conf,2)}."
+        }
+
         return synthesis
     
     def _create_analysis_entity(
