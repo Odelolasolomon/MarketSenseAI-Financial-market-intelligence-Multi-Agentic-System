@@ -6,6 +6,15 @@ import os
 import sys
 import logging
 
+# Add /app to Python path so imports work (Cloud Run app directory)
+app_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if app_dir not in sys.path:
+    sys.path.insert(0, app_dir)
+
+# Also add current directory
+if '/app' not in sys.path:
+    sys.path.insert(0, '/app')
+
 # Configure logging immediately
 logging.basicConfig(
     level=logging.INFO,
