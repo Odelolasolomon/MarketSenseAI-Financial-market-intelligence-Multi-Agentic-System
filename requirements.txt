@@ -42,5 +42,5 @@ lxml
 beautifulsoup4
 fastapi-cache2
 uvicorn
-pygame
+#pygame
 requests
