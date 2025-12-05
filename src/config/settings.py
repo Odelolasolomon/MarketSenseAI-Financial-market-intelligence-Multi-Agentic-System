@@ -18,8 +18,8 @@ class Settings(BaseSettings):
     coingecko_api_key: str = Field(..., env="COINGECKO_API_KEY")
     binance_api_key: str = Field(default="", env="BINANCE_API_KEY")
     binance_api_secret: str = Field(default="", env="BINANCE_API_SECRET")
-    serper_api_key: str = Field(..., env="SERPER_API_KEY")  # Added
-    serpapi_key: str = Field(..., env="SERPAPI_KEY")  # Added
+    serper_api_key: str = Field(..., env="SERPER_API_KEY")  
+    serpapi_key: str = Field(..., env="SERPAPI_KEY")  
     
     # Database
     database_url: str = Field(default="sqlite:///./multiasset.db", env="DATABASE_URL")

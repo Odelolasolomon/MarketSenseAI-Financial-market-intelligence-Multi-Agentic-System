@@ -1,6 +1,6 @@
-# src/application/agents/sentiment_analyst.py
 """
 Sentiment Analyst - Analyzes market sentiment from crypto news sources
+COMPLETE VERSION - Replace your entire sentiment_analyst.py with this
 """
 import json
 import asyncio
@@ -65,12 +65,14 @@ class SentimentAnalysis:
 class SentimentAnalyst(BaseAgent):
     """Analyzes market sentiment from crypto news sources"""
     
-    def __init__(self, model: str = "llama-3.3-70b-versatile"):
+    def __init__(self):
+        # Call parent constructor with name and description as required by BaseAgent
         super().__init__(
             name="Sentiment Analyst",
-            model=model,
-            system_prompt=self._get_system_prompt()
+            description="Analyzes market sentiment from cryptocurrency news sources and social media"
         )
+        
+        # Initialize services
         self.rag_service = RAGService()
         self.translation_service = TranslationService()
         self.cache = get_cache()
@@ -81,10 +83,14 @@ class SentimentAnalyst(BaseAgent):
             from src.config.settings import get_settings
             settings = get_settings()
             
-            if settings.serper_api_key or settings.serpapi_key:
+            # Strip quotes from API keys if present
+            serper_key = settings.serper_api_key.strip('"').strip("'") if settings.serper_api_key else ""
+            serpapi_key = settings.serpapi_key.strip('"').strip("'") if settings.serpapi_key else ""
+            
+            if serper_key or serpapi_key:
                 self.crypto_scraper = CryptoNewsScraper(
-                    serper_api_key=settings.serper_api_key,
-                    serpapi_key=settings.serpapi_key
+                    serper_api_key=serper_key,
+                    serpapi_key=serpapi_key
                 )
                 logger.info("CryptoNewsScraper initialized with API keys")
             else:
@@ -95,8 +101,8 @@ class SentimentAnalyst(BaseAgent):
         self.max_articles = 50
         self.recency_hours = 24
         
-    def _get_system_prompt(self) -> str:
-        """Get the system prompt for sentiment analysis"""
+    def get_system_prompt(self) -> str:
+        """Get the system prompt for sentiment analysis (required by BaseAgent)"""
         return """You are a Sentiment Analyst specializing in cryptocurrency markets.
         
         Your task is to analyze news articles, social media posts, and market discussions
@@ -127,7 +133,31 @@ class SentimentAnalyst(BaseAgent):
         IMPORTANT: Only respond with valid JSON. No explanations, no markdown formatting.
         """
     
-    async def analyze(self, query: str, context: Optional[Dict] = None) -> SentimentAnalysis:
+    async def _translate_query(self, query: str) -> str:
+        """
+        Translate query to English if needed (with fallback)
+        
+        Args:
+            query: User query in any language
+            
+        Returns:
+            Query in English
+        """
+        try:
+            # Check if translation service has the method
+            if hasattr(self.translation_service, 'translate_to_english'):
+                return await self.translation_service.translate_to_english(query)
+            elif hasattr(self.translation_service, 'translate'):
+                return await self.translation_service.translate(query, target_lang='en')
+            else:
+                # Fallback: assume query is already in English
+                logger.warning("Translation service method not found, assuming query is in English")
+                return query
+        except Exception as e:
+            logger.warning(f"Translation failed: {str(e)}, using original query")
+            return query
+    
+    async def analyze(self, query: str, context: Optional[Dict] = None) -> Dict[str, Any]:
         """
         Analyze sentiment for a given cryptocurrency
         
@@ -136,7 +166,7 @@ class SentimentAnalyst(BaseAgent):
             context: Additional context including asset_symbol
             
         Returns:
-            SentimentAnalysis object
+            Dictionary with sentiment analysis results
         """
         try:
             asset_symbol = context.get('asset_symbol', '').upper() if context else ''
@@ -145,8 +175,8 @@ class SentimentAnalyst(BaseAgent):
             
             logger.info(f"Sentiment Analyst analyzing: {asset_symbol}")
             
-            # Translate query to English if needed
-            query_in_english = await self.translation_service.translate_to_english(query)
+            # Translate query to English if needed (with fallback)
+            query_in_english = await self._translate_query(query)
             
             # Get sentiment data from multiple sources
             sentiment_data = await self._collect_sentiment_data(
@@ -161,13 +191,16 @@ class SentimentAnalyst(BaseAgent):
                 sentiment_data
             )
             
-            # Create and return SentimentAnalysis object
-            return self._create_sentiment_analysis(
+            # Create sentiment analysis object
+            sentiment_analysis = self._create_sentiment_analysis(
                 query=query,
                 asset_symbol=asset_symbol,
                 analysis_result=analysis_result,
                 source_data=sentiment_data
             )
+            
+            # Return as dictionary for consistency with other agents
+            return sentiment_analysis.to_dict()
             
         except Exception as e:
             logger.error(f"Error in sentiment analysis: {str(e)}")
@@ -292,7 +325,14 @@ class SentimentAnalyst(BaseAgent):
         """
         try:
             prompt = self._create_analysis_prompt(query, asset_symbol, sentiment_data)
-            response = await self.generate_response(prompt)
+            system_prompt = self.get_system_prompt()
+            
+            # Use BaseAgent's execute_llm_call method
+            response = await self.execute_llm_call(
+                system_prompt=system_prompt,
+                user_prompt=prompt
+            )
+            
             analysis_result = self._parse_llm_response(response)
             enhanced_result = self._enhance_analysis(analysis_result, sentiment_data)
             return enhanced_result
@@ -317,13 +357,15 @@ class SentimentAnalyst(BaseAgent):
             news_summary.append(f"   Source: {article.get('source', 'Unknown')}")
             news_summary.append("")
         
-        # Create prompt - using chr(10) instead of \n in f-string expressions
+        # Create prompt
+        news_text = "\n".join(news_summary) if news_summary else "- No recent news articles available"
+        
         prompt = f"""Analyze the sentiment for {asset_symbol} based on the following data:
 
 QUERY: {query}
 
 RECENT NEWS ARTICLES:
-{"- No recent news articles available" if not fresh_news else chr(10).join(news_summary)}
+{news_text}
 
 HISTORICAL CONTEXT (RAG Documents):
 {"- No historical context available" if not rag_documents else f"Found {len(rag_documents)} relevant documents"}
