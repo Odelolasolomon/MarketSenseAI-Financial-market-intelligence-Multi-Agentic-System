@@ -29,8 +29,8 @@ ENV DEBUG=False
 # Expose port
 EXPOSE 8080
 
-# Health check - uses root endpoint which responds immediately
-HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
+# Health check - calls root endpoint which responds immediately
+HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
     CMD curl -f http://localhost:8080/ || exit 1
 
 # Run FastAPI application with uvicorn
