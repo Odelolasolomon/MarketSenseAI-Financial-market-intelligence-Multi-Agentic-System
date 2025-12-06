@@ -2,7 +2,7 @@
 FROM node:20-alpine AS deps
 WORKDIR /app
 
-# Install dependencies based on the preferred package manager
+# Install dependencies
 COPY package.json pnpm-lock.yaml* ./
 RUN npm install -g pnpm && pnpm install --frozen-lockfile
 
@@ -14,7 +14,7 @@ WORKDIR /app
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
 
-# Set environment variable for standalone build
+# Set environment variables
 ENV NEXT_TELEMETRY_DISABLED=1
 
 # Build Next.js app
@@ -31,12 +31,14 @@ ENV NEXT_TELEMETRY_DISABLED=1
 RUN addgroup --system --gid 1001 nodejs
 RUN adduser --system --uid 1001 nextjs
 
-# Copy necessary files from builder
-COPY --from=builder /app/public ./public
+# Copy package files and install production dependencies
+COPY package.json pnpm-lock.yaml* ./
+RUN npm install -g pnpm && pnpm install --prod --frozen-lockfile
 
-# Copy standalone output (optimized for production)
-COPY --from=builder --chown=nextjs:nodejs /app/.next/standalone ./
-COPY --from=builder --chown=nextjs:nodejs /app/.next/static ./.next/static
+# Copy built application
+COPY --from=builder --chown=nextjs:nodejs /app/.next ./.next
+COPY --from=builder --chown=nextjs:nodejs /app/public ./public
+COPY --from=builder /app/next.config.ts ./
 
 USER nextjs
 
@@ -46,5 +48,5 @@ EXPOSE 3000
 ENV PORT=3000
 ENV HOSTNAME="0.0.0.0"
 
-# Start Next.js server using standalone mode
-CMD ["node", "server.js"]
+# Start Next.js server
+CMD ["pnpm", "start"]
