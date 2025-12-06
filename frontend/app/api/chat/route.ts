@@ -4,77 +4,81 @@ import { streamText } from "ai";
 export const runtime = "edge";
 
 export async function POST(req: Request) {
-    const { messages } = await req.json();
-    const lastMessage = messages[messages.length - 1] as any;
-    const textContent = lastMessage.parts?.find((part: any) => part.type === "text")?.text || lastMessage.content || "";
+  const body = await req.json();
 
-    try {
-        // Get backend URL from environment, validate it exists
-        const backendUrl = process.env.NEXT_PUBLIC_BASE_API_URL;
-        if (!backendUrl) {
-            console.error("NEXT_PUBLIC_BASE_API_URL environment variable is not set");
-            return new Response(
-                JSON.stringify({
-                    error: 'Backend API URL is not configured. Please set NEXT_PUBLIC_BASE_API_URL.',
-                }),
-                { status: 500 }
-            );
-        }
+  const { messages, asset, timeframe }: { messages: UIMessage[]; asset?: string; timeframe?: string } = body;
 
-        // Build the analyze endpoint URL
-        const analyzeUrl = `${backendUrl}/analyze`;
-        console.log(`Calling backend: ${analyzeUrl}`);
+  console.log("Received request with body:", body);  
 
-        const response = await fetch(analyzeUrl, {
-            method: "POST",
-            headers: {
-                "Content-Type": "application/json",
-            },
-            body: JSON.stringify({
-                query: textContent,
-                timeframe: "medium"
-            }),
-        });
+  if (
+    !Array.isArray(messages) ||
+    messages.length === 0 ||
+    !messages[messages.length - 1] ||
+    !Array.isArray(messages[messages.length - 1].parts)
+  ) {
+    return new Response("Invalid message format", { status: 400 });
+  }
 
-        if (!response.ok) {
-            const errorText = await response.text();
-            console.error(`Backend error (${response.status}): ${errorText}`);
-            return new Response(
-                JSON.stringify({
-                    error: `Backend returned ${response.status}: ${errorText}`,
-                }),
-                { status: response.status }
-            );
-        }
+  const lastMessage = messages[messages.length - 1].parts.find(
+    (part) => part.type === "text"
+  );
+  
+  if (!lastMessage || !lastMessage.text) {
+    return new Response("Invalid message format", { status: 400 });
+  }
 
-        const analysisData = await response.json();
-        console.log("Response from backend:", analysisData);
+  // Validate required parameters
+  if (!asset || !timeframe) {
+    return new Response("Asset and timeframe are required", { status: 400 });
+  }
 
-        const result = streamText({
-            model: google("gemini-2.5-flash"),
-            system: "You are MarketSenseAI, a professional financial analyst assistant. Format your responses in clear, structured sections using markdown. First give a summary of the analysis to the user and then present the details in an easy-to-understand format. Be concise but comprehensive.",
-            messages: [
-                {
-                    role: 'user',
-                    content: `Based on this comprehensive market analysis, provide a clear investment recommendation:
+  try {
+    const response = await fetch(
+      `${process.env.NEXT_PUBLIC_BASE_API_URL}/analyze`,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          query: lastMessage.text,
+          asset: asset,
+          timeframe: timeframe,
+        }),
+      }
+    );
+
+    if (!response.ok) {
+      return new Response("Error from backend", { status: 500 });
+    }
+
+    const analysisData = await response.json();
+    console.log("Response from backend:", analysisData);
+
+    const result = streamText({
+      model: google("gemini-2.5-flash"),
+      system:
+        "You are MarketSenseAI, a professional financial analyst assistant. Format your responses in clear, structured sections using markdown. First give a summary of the analysis to the user and then present the details in an easy-to-understand format. Be concise but comprehensive.",
+      messages: [
+        {
+          role: "user",
+          content: `Based on this comprehensive market analysis for ${asset} (${timeframe} timeframe), provide a clear investment recommendation:
 
 ${JSON.stringify(analysisData, null, 2)}
 
 Format your response with clear sections and actionable insights.`,
-                },
-            ],
-        });
+        },
+      ],
+    });
 
-        return result.toUIMessageStreamResponse();
-    }
-    catch (error) {
-        console.error("Error processing request:", error);
-        const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-        return new Response(
-            JSON.stringify({
-                error: `Failed to process the request: ${errorMessage}`,
-            }),
-            { status: 500 }
-        );
-    }
+    return result.toUIMessageStreamResponse();
+  } catch (error) {
+    console.error("Error processing request:", error);
+    return new Response(
+      JSON.stringify({
+        error: "Failed to process the request.",
+      }),
+      { status: 500 }
+    );
+  }
 }

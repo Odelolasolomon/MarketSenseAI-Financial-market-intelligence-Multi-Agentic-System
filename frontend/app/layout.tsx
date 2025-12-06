@@ -29,7 +29,6 @@ export default function RootLayout({
       <body
         className="font-geist-mono"
       >
-        {/* <Navbar /> */}
         {children}
       </body>
     </html>
