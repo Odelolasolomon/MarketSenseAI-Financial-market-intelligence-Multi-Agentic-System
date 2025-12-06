@@ -38,13 +38,17 @@ class AnalysisRequest(BaseModel):
     query: str = Field(..., description="Investment query")
     asset: Optional[str] = Field(None, description="Asset symbol")
     timeframe: str = Field("medium", description="Analysis timeframe")
+    session_id: Optional[str] = Field(None, description="Conversation session ID for memory")
+    conversation_id: Optional[str] = Field(None, description="Conversation ID for memory")
     
     class Config:
         json_schema_extra = {
             "example": {
                 "query": "Should I buy Bitcoin now?",
                 "asset": "BTC",
-                "timeframe": "medium"
+                "timeframe": "medium",
+                "session_id": "optional-session-uuid",
+                "conversation_id": "optional-conversation-uuid"
             }
         }
 
@@ -106,7 +110,10 @@ async def analyze_market(
     Perform comprehensive market analysis
     
     This endpoint coordinates multiple AI agents to provide
-    a comprehensive investment analysis for the requested asset.
+    a comprehensive forex and crypto investment analysis for the requested asset.
+    
+    Optional conversation memory: Pass session_id and conversation_id to maintain
+    conversation history across requests.
     """
     try:
         logger.info(f"Analysis request: {request.query} for {request.asset}")
@@ -117,11 +124,21 @@ async def analyze_market(
         # Parse timeframe
         timeframe = TimeframeVO.from_string(request.timeframe)
         
+        # Build context with conversation memory if provided
+        context = {
+            "asset_symbol": request.asset or "MARKET",
+        }
+        if request.session_id and request.conversation_id:
+            context["session_id"] = request.session_id
+            context["conversation_id"] = request.conversation_id
+            logger.info(f"Using conversation context: {request.conversation_id}")
+        
         # Perform analysis
         result = await analysis_service.analyze(
             query=request.query,
             asset_symbol=request.asset or "MARKET",
-            timeframe=timeframe
+            timeframe=timeframe,
+            context=context
         )
         
         # Cache result in background
@@ -271,6 +288,10 @@ async def translate_text(text: str, src: str, dest: str):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
     
+# Include conversation routes
+from src.adapters.web.routes.conversations import router as conversation_router
+router.include_router(conversation_router)
+
 @router.post("/api/v1/update-crypto-knowledge")
 async def update_crypto_knowledge(crypto_data: Dict[str, Any]):
     try:

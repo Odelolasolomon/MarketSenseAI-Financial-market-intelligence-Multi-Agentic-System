@@ -83,31 +83,31 @@ def create_app() -> FastAPI:
             }
         )
     
-    # Startup event
+    # Startup event - non-blocking for Cloud Run compatibility
     @app.on_event("startup")
     async def startup_event():
-        """Initialize services on startup"""
+        """Initialize services on startup (non-blocking)"""
         logger.info("Starting Multi-Asset AI API...")
         logger.info(f"Environment: {settings.environment}")
         logger.info(f"Debug mode: {settings.debug}")
         
-        # Initialize database
+        # Initialize database (non-blocking)
         try:
             from src.infrastructure.database import get_db
             db = get_db()
             db.create_tables()
             logger.info("Database initialized")
         except Exception as e:
-            logger.error(f"Database initialization failed: {str(e)}")
+            logger.warning(f"Database initialization deferred: {str(e)}")
         
-        # Test cache connection
+        # Test cache connection (non-blocking)
         try:
             from src.infrastructure.cache import get_cache
             cache = get_cache()
             if cache.health_check():
                 logger.info("Cache connection established")
         except Exception as e:
-            logger.error(f"Cache initialization failed: {str(e)}")
+            logger.warning(f"Cache initialization deferred: {str(e)}")
     
     # Shutdown event
     @app.on_event("shutdown")
@@ -115,9 +115,18 @@ def create_app() -> FastAPI:
         """Cleanup on shutdown"""
         logger.info("Shutting down Multi-Asset AI API...")
     
+    # Root health endpoint for Cloud Run health checks
+    @app.get("/", response_model={"status": str, "service": str})
+    async def root_health():
+        """Root health check - Cloud Run calls this endpoint"""
+        return {"status": "healthy", "service": "MarketSenseAI"}
+    
     # Include routers
-    from src.adapters.web.routes import router
+    from src.adapters.web.api_routes import router
+    from src.adapters.web.routes.langchain_memory_routes import router as langchain_memory_router
+    
     app.include_router(router, prefix="/api/v1")
+    app.include_router(langchain_memory_router)
     
     return app
 
