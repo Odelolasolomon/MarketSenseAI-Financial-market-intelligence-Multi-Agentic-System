@@ -31,9 +31,9 @@ ENV NEXT_TELEMETRY_DISABLED=1
 RUN addgroup --system --gid 1001 nodejs
 RUN adduser --system --uid 1001 nextjs
 
-# Copy package files and install production dependencies
+# Copy package files and install ALL dependencies (TypeScript needed at runtime)
 COPY package.json pnpm-lock.yaml* ./
-RUN npm install -g pnpm && pnpm install --prod --frozen-lockfile
+RUN npm install -g pnpm && pnpm install --frozen-lockfile
 
 # Copy built application
 COPY --from=builder --chown=nextjs:nodejs /app/.next ./.next
