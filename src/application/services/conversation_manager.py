@@ -203,6 +203,12 @@ class ConversationManager:
             if not redis_client:
                 return
             
+            # Check if redis_client has setex method (real Redis)
+            if not hasattr(redis_client, 'setex'):
+                # Using InMemoryCache, skip persistence
+                logger.debug("Using in-memory cache, skipping Redis persistence")
+                return
+            
             session_key = f"session:{session.session_id}"
             session_data = json.dumps(session.to_dict(), default=str)
             redis_client.setex(
