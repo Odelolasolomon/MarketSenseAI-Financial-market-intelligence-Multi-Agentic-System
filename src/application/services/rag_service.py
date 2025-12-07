@@ -91,10 +91,21 @@ class RAGService:
                 )
             )
             
-            # Initialize embedding model in thread pool
+            # Initialize embedding model in thread pool with explicit device setting
+            def load_model():
+                import torch
+                # Force CPU to avoid meta tensor issues
+                device = 'cpu'
+                model = SentenceTransformer(
+                    self.embedding_model_name,
+                    device=device,
+                    trust_remote_code=True
+                )
+                return model
+            
             self.embedding_model = await asyncio.get_event_loop().run_in_executor(
                 self.executor,
-                lambda: SentenceTransformer(self.embedding_model_name)
+                load_model
             )
             
             # Initialize collections

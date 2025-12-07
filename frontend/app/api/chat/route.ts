@@ -10,7 +10,8 @@ export async function POST(req: Request) {
     messages,
     asset,
     timeframe,
-  }: { messages: UIMessage[]; asset?: string; timeframe?: string } = body;
+    conversation_id,
+  }: { messages: UIMessage[]; asset?: string; timeframe?: string; conversation_id?: string } = body;
 
   if (
     !Array.isArray(messages) ||
@@ -46,6 +47,7 @@ export async function POST(req: Request) {
           query: lastMessage.text,
           asset,
           timeframe,
+          conversation_id,
         }),
       }
     );

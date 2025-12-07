@@ -124,14 +124,13 @@ async def analyze_market(
         # Parse timeframe
         timeframe = TimeframeVO.from_string(request.timeframe)
         
-        # Build context with conversation memory if provided
+        # Build context with conversation_id for caching
         context = {
             "asset_symbol": request.asset or "MARKET",
         }
-        if request.session_id and request.conversation_id:
-            context["session_id"] = request.session_id
+        if request.conversation_id:
             context["conversation_id"] = request.conversation_id
-            logger.info(f"Using conversation context: {request.conversation_id}")
+            logger.info(f"Using conversation ID for caching: {request.conversation_id}")
         
         # Perform analysis
         result = await analysis_service.analyze(

@@ -34,7 +34,8 @@ import {
 
 import { useChat } from "@ai-sdk/react";
 import { CopyIcon, RefreshCcwIcon } from "lucide-react";
-import { Fragment, useState } from "react";
+import { Fragment, useState, useEffect } from "react";
+import { nanoid } from "nanoid";
 
 const suggestions = [
   "Should I invest in buying Bitcoin now?",
@@ -62,6 +63,36 @@ export default function ChatPage() {
   const [selectedAsset, setSelectedAsset] = useState<string>("BTC");
   const [selectedTimeframe, setSelectedTimeframe] = useState<string>("medium");
 
+  // Conversation ID: Asset-specific (for backend caching only)
+  // Gemini AI handles conversation memory automatically
+  const [conversationId, setConversationId] = useState(() => {
+    if (typeof window !== 'undefined') {
+      const key = `marketsense_conversation_${selectedAsset}`;
+      const stored = localStorage.getItem(key);
+      if (stored) return stored;
+      const newId = nanoid();
+      localStorage.setItem(key, newId);
+      return newId;
+    }
+    return nanoid();
+  });
+
+  // Update conversation ID when asset changes (for backend caching)
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      const key = `marketsense_conversation_${selectedAsset}`;
+      const stored = localStorage.getItem(key);
+
+      if (stored) {
+        setConversationId(stored);
+      } else {
+        const newId = nanoid();
+        localStorage.setItem(key, newId);
+        setConversationId(newId);
+      }
+    }
+  }, [selectedAsset]);
+
   const { messages, sendMessage, status, regenerate } = useChat();
 
   const handleSubmit = (message: PromptInputMessage) => {
@@ -77,6 +108,7 @@ export default function ChatPage() {
         body: {
           asset: selectedAsset,
           timeframe: selectedTimeframe,
+          conversation_id: conversationId,
         },
       }
     );
@@ -90,6 +122,7 @@ export default function ChatPage() {
         body: {
           asset: selectedAsset,
           timeframe: selectedTimeframe,
+          conversation_id: conversationId,
         },
       }
     );
