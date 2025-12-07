@@ -847,13 +847,13 @@ This project is licensed under the MIT License - see the LICENSE file for detail
 - **Email1**: odelolasolomon5@gmail.com
 - **Email2**: kingsleyibekwe.c@gmail.com
 - **Email3**: danielokpara29@gmail.com
-- **Documentation**: See `/docs` directory
 
 ---
 
 **Built with ❤️ by the MarketSense Team**
 
 *Empowering informed investment decisions through AI-powered multi-agent analysis*
+
 
 
 
