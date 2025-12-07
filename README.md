@@ -844,7 +844,9 @@ This project is licensed under the MIT License - see the LICENSE file for detail
 ## 📞 Support & Contact
 
 - **Issues**: [GitHub Issues](https://github.com/yourusername/multi-asset-ai/issues)
-- **Email**: (odelolasolomon5@gmail.com, kingsleyibekwe.c@gmail.com, danielokpara29@gmail.com)
+- **Email1**: odelolasolomon5@gmail.com
+- **Email2**: kingsleyibekwe.c@gmail.com
+- **Email3**: danielokpara29@gmail.com
 - **Documentation**: See `/docs` directory
 
 ---
@@ -852,5 +854,6 @@ This project is licensed under the MIT License - see the LICENSE file for detail
 **Built with ❤️ by the MarketSense Team**
 
 *Empowering informed investment decisions through AI-powered multi-agent analysis*
+
 
 
