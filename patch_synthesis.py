@@ -13,8 +13,7 @@ def patch_synthesis_agent():
     with open(file_path, 'r', encoding='utf-8') as f:
         content = f.read()
     
-    # Find the section where we collect risks
-    # Add default risks if empty
+
     patch1 = '''
         # Enhanced risk assessment - ensure we always have comprehensive risks
         if not key_risks or len(key_risks) < 3:
@@ -41,6 +40,7 @@ def patch_synthesis_agent():
     # Find where key_risks and risk_mitigations are collected
     pattern = r'(key_risks = _collect_list\("key_risks", macro, technical, sentiment\)\s+risk_mitigations = _collect_list\("risk_mitigations", macro, technical, sentiment\))'
     
+
     if re.search(pattern, content):
         content = re.sub(pattern, r'\1' + patch1, content)
         print("✅ Patch 1 applied: Enhanced risk assessment")
