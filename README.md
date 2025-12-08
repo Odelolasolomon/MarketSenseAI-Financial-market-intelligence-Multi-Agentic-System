@@ -814,6 +814,29 @@ mypy src/
 - **API Reference**: http://localhost:8000/docs (when running)
 - **Agent Development**: See agent source files for examples
 
+
+
+## 📈 Evaluation & Benchmark Results
+
+We continuously evaluate MarketSenseAI using a rigorous framework to ensure high-quality analysis. Below are the benchmark results from our latest evaluation run (2025-12-08).
+
+### Benchmark Metrics (Llama-3.1-8b-instant Evaluator)
+
+| Asset | Query Category | Overall Score | Coherence | Reasoning | Actionability | Response Time (s) |
+|-------|----------------|---------------|-----------|-----------|---------------|-------------------|
+| BTC | Short-term Trade | 75/100 | 78 | 80 | 60 | 94.09 |
+| ETH | Long-term Invest | 62/100 | 78 | 65 | 40 | 78.26 |
+| BTC | Risk Analysis | 62/100 | 78 | 68 | 40 | 74.18 |
+| ETH | Hold/Sell Decision | 68/100 | 78 | 65 | 80 | 81.49 |
+| BTC | Market Conditions | 75/100 | 78 | 80 | 60 | 93.03 |
+
+**Key Findings:**
+- **High Coherence**: Consistent clarity across all queries (78/100).
+- **Actionability**: Varies by query type, with specific portfolio advice ("Hold/Sell") scoring highest (80/100).
+- **Response Time**: Currently averages 80-90s for full comprehensive multi-agent synthesis.
+
+For full details, see the raw benchmark data: [`benchmark_results_20251208_155333.csv`](./benchmark_results_20251208_155333.csv).
+
 ## Future Directions 
 ### Conversation Management Endpoints
 
@@ -893,6 +916,8 @@ This project is licensed under the MIT License - see the LICENSE file for detail
 **Built with ❤️ by the MarketSense Team**
 
 *Empowering informed investment decisions through AI-powered multi-agent analysis*
+
+
 
 
 
