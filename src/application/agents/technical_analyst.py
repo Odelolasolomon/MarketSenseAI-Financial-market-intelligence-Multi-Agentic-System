@@ -82,9 +82,10 @@ Provide analysis in JSON format with:
             
             logger.info(f"Technical Analyst analyzing: {asset_symbol}")
             
-            # Retrieve context using RAGService
-            documents = await self.rag_service.query_collection(query_in_english, "crypto")
-            logger.info(f"Retrieved {len(documents)} documents for query: {query_in_english}")
+            # Retrieve context using RAGService (DISABLED - causing SentenceTransformer errors)
+            # documents = await self.rag_service.query_collection(query_in_english, "crypto")
+            documents = []
+            logger.info(f"RAG service disabled - skipping document retrieval")
             
             # Collect price data and calculate indicators
             technical_data = await self._collect_technical_data(asset_symbol)

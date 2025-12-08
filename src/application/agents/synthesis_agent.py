@@ -180,9 +180,10 @@ Provide synthesis in JSON format:
             if context:
                 context["memory_id"] = memory_id
             
-            # Retrieve context using RAGService
-            documents = await self.rag_service.query_collection(query_in_english, "macro")
-            logger.info(f"Retrieved {len(documents)} documents for query: {query_in_english}")
+            # Retrieve context using RAGService (DISABLED - causing SentenceTransformer errors)
+            # documents = await self.rag_service.query_collection(query_in_english, "macro")
+            documents = []
+            logger.info(f"RAG service disabled - skipping document retrieval")
             
             # Execute all specialist agents in parallel
             macro_task = self.macro_analyst.analyze(enriched_query, context)
@@ -422,6 +423,90 @@ Provide synthesis in JSON format:
         tech_short = _short(technical_summary, 40)
         sent_short = _short(sentiment_summary, 40)
         
+        # Extract current price from technical analysis
+        # TechnicalAnalyst stores price in raw_technical_data
+        current_price = None
+        raw_data = self._safe_get(technical, "raw_technical_data", {})
+        if raw_data:
+            current_price = raw_data.get("current_price")
+        
+        # Fallback: try other locations
+        if not current_price:
+            current_price = self._safe_get(technical, "current_price") or self._safe_get(technical, "price")
+        
+        # Last fallback: try detailed_analysis
+        if not current_price:
+            detailed = self._safe_get(technical, "detailed_analysis", {})
+            current_price = detailed.get("current_price") or detailed.get("price")
+        
+        logger.info(f"Extracted current price: {current_price} for synthesis")
+        
+        # Calculate entry points, stop loss, and time horizon
+        entry_points = []
+        stop_loss = None
+        time_horizon = "medium"
+        
+        if current_price:
+            try:
+                current_price = float(current_price)
+                
+                # Calculate entry points based on outlook
+                if final_outlook == "bullish":
+                    # For bullish: suggest buying on dips
+                    entry_points = [
+                        round(current_price * 0.98, 2),  # 2% below current
+                        round(current_price * 0.95, 2),  # 5% below current
+                    ]
+                    # Stop loss 8-12% below current price
+                    stop_loss = round(current_price * 0.88, 2)
+                    time_horizon = "medium" if avg_conf >= 0.65 else "long"
+                    
+                elif final_outlook == "bearish":
+                    # For bearish: suggest selling rallies or shorting
+                    entry_points = [
+                        round(current_price * 1.02, 2),  # 2% above current (for shorts)
+                        round(current_price * 1.05, 2),  # 5% above current
+                    ]
+                    # Stop loss 8% above current price (for shorts)
+                    stop_loss = round(current_price * 1.08, 2)
+                    time_horizon = "short" if avg_conf >= 0.65 else "medium"
+                    
+                else:  # neutral
+                    # For neutral: wait for better entry
+                    entry_points = [
+                        round(current_price * 0.95, 2),  # Buy 5% lower
+                        round(current_price * 0.90, 2),  # Buy 10% lower
+                    ]
+                    stop_loss = round(current_price * 0.85, 2)
+                    time_horizon = "long"
+                    
+            except (ValueError, TypeError) as e:
+                logger.warning(f"Could not calculate entry/stop from price {current_price}: {e}")
+        
+        # If we still don't have entry points, try to extract from technical analysis
+        if not entry_points:
+            tech_entry = self._safe_get(technical, "entry_points") or self._safe_get(technical, "support_levels")
+            if tech_entry and isinstance(tech_entry, list):
+                entry_points = [float(x) for x in tech_entry[:2] if x]
+        
+        # If we still don't have stop loss, try to extract from technical analysis
+        if not stop_loss:
+            tech_stop = self._safe_get(technical, "stop_loss") or self._safe_get(technical, "key_support")
+            if tech_stop:
+                try:
+                    stop_loss = float(tech_stop)
+                except (ValueError, TypeError):
+                    pass
+        
+        # Determine time horizon based on confidence and outlook strength
+        if not time_horizon or time_horizon == "medium":
+            if avg_conf >= 0.75:
+                time_horizon = "short"  # High confidence = shorter timeframe
+            elif avg_conf >= 0.55:
+                time_horizon = "medium"
+            else:
+                time_horizon = "long"  # Low confidence = longer timeframe
+        
         executive_summary = (
             f"Technical analysis summary: {tech_short}\n"
             f"Macro analyst summary: {mac_short}\n"
@@ -440,9 +525,9 @@ Provide synthesis in JSON format:
             "outlook": final_outlook,
             "trading_action": trading_action,
             "position_sizing": position_sizing,
-            "entry_points": [],
-            "stop_loss": None,
-            "time_horizon": "medium",
+            "entry_points": entry_points,
+            "stop_loss": stop_loss,
+            "time_horizon": time_horizon,
             "bullish_factors": bullish_factors,
             "bearish_factors": bearish_factors,
             "critical_factors": critical_factors,
