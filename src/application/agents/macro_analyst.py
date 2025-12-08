@@ -224,30 +224,31 @@ IMPORTANT: Only respond with valid JSON. No explanations, no markdown formatting
             return []
     
     async def _get_crypto_rag_documents(self, query: str, asset_symbol: str) -> List[Dict]:
-        """Get crypto-specific documents from RAG service"""
-        try:
-            await self.rag_service.initialize()
-            
-            # Use crypto-specific collection if available
-            collection_name = "crypto_macro_data"
-            try:
-                documents = await self.rag_service.query_collection(
-                    query=f"crypto macroeconomic {query}",
-                    collection_name=collection_name,
-                    n_results=10
-                )
-            except:
-                # Fallback to general macro collection
-                documents = await self.rag_service.query_collection(
-                    query=f"macroeconomic {query} cryptocurrency",
-                    collection_name="macro_data",
-                    n_results=10
-                )
-            
-            return documents
-        except Exception as e:
-            logger.warning(f"Error getting crypto RAG documents: {str(e)}")
-            return []
+        """Get crypto-specific documents from RAG service (DISABLED)"""
+        # RAG service disabled to prevent SentenceTransformer errors
+        logger.info("RAG service disabled - skipping document retrieval")
+        return []
+        
+        # Original code commented out:
+        # try:
+        #     await self.rag_service.initialize()
+        #     collection_name = "crypto_macro_data"
+        #     try:
+        #         documents = await self.rag_service.query_collection(
+        #             query=f"crypto macroeconomic {query}",
+        #             collection_name=collection_name,
+        #             n_results=10
+        #         )
+        #     except:
+        #         documents = await self.rag_service.query_collection(
+        #             query=f"macroeconomic {query} cryptocurrency",
+        #             collection_name="macro_data",
+        #             n_results=10
+        #         )
+        #     return documents
+        # except Exception as e:
+        #     logger.warning(f"Error getting crypto RAG documents: {str(e)}")
+        #     return []
     
     async def _generate_crypto_macro_analysis(
         self,

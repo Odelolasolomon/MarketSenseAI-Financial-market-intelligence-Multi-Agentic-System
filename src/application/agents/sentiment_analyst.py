@@ -304,18 +304,23 @@ class SentimentAnalyst(BaseAgent):
         return False
     
     async def _get_rag_documents(self, query: str, asset_symbol: str) -> List[Dict]:
-        """Get relevant documents from RAG service"""
-        try:
-            await self.rag_service.initialize()
-            documents = await self.rag_service.query_collection(
-                query=query,
-                collection_name="news_sentiment",
-                n_results=10
-            )
-            return documents
-        except Exception as e:
-            logger.warning(f"Error getting RAG documents: {str(e)}")
-            return []
+        """Get relevant documents from RAG service (DISABLED)"""
+        # RAG service disabled to prevent SentenceTransformer errors
+        logger.info("RAG service disabled - skipping document retrieval")
+        return []
+        
+        # Original code commented out:
+        # try:
+        #     await self.rag_service.initialize()
+        #     documents = await self.rag_service.query_collection(
+        #         query=query,
+        #         collection_name="news_sentiment",
+        #         n_results=10
+        #     )
+        #     return documents
+        # except Exception as e:
+        #     logger.warning(f"Error getting RAG documents: {str(e)}")
+        #     return []
     
     async def _generate_sentiment_analysis(
         self, 
